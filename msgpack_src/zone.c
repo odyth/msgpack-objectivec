@@ -27,16 +27,16 @@ struct msgpack_zone_chunk {
 static inline bool init_chunk_list(msgpack_zone_chunk_list* cl, size_t chunk_size)
 {
 	msgpack_zone_chunk* chunk = (msgpack_zone_chunk*)malloc(
-			sizeof(msgpack_zone_chunk) + chunk_size);
+                                                            sizeof(msgpack_zone_chunk) + chunk_size);
 	if(chunk == NULL) {
 		return false;
 	}
-
+    
 	cl->head = chunk;
 	cl->free = chunk_size;
 	cl->ptr  = ((char*)chunk) + sizeof(msgpack_zone_chunk);
 	chunk->next = NULL;
-
+    
 	return true;
 }
 
@@ -74,23 +74,23 @@ static inline void clear_chunk_list(msgpack_zone_chunk_list* cl, size_t chunk_si
 void* msgpack_zone_malloc_expand(msgpack_zone* zone, size_t size)
 {
 	msgpack_zone_chunk_list* const cl = &zone->chunk_list;
-
+    
 	size_t sz = zone->chunk_size;
-
+    
 	while(sz < size) {
 		sz *= 2;
 	}
-
+    
 	msgpack_zone_chunk* chunk = (msgpack_zone_chunk*)malloc(
-			sizeof(msgpack_zone_chunk) + sz);
-
+                                                            sizeof(msgpack_zone_chunk) + sz);
+    
 	char* ptr = ((char*)chunk) + sizeof(msgpack_zone_chunk);
-
+    
 	chunk->next = cl->head;
 	cl->head = chunk;
 	cl->free = sz - size;
 	cl->ptr  = ptr + size;
-
+    
 	return ptr;
 }
 
@@ -123,37 +123,37 @@ static inline void clear_finalizer_array(msgpack_zone_finalizer_array* fa)
 }
 
 bool msgpack_zone_push_finalizer_expand(msgpack_zone* zone,
-		void (*func)(void* data), void* data)
+                                        void (*func)(void* data), void* data)
 {
 	msgpack_zone_finalizer_array* const fa = &zone->finalizer_array;
-
+    
 	const size_t nused = fa->end - fa->array;
-
+    
 	size_t nnext;
 	if(nused == 0) {
 		nnext = (sizeof(msgpack_zone_finalizer) < 72/2) ?
-				72 / sizeof(msgpack_zone_finalizer) : 8;
-
+        72 / sizeof(msgpack_zone_finalizer) : 8;
+        
 	} else {
 		nnext = nused * 2;
 	}
-
+    
 	msgpack_zone_finalizer* tmp =
-		(msgpack_zone_finalizer*)realloc(fa->array,
-				sizeof(msgpack_zone_finalizer) * nnext);
+    (msgpack_zone_finalizer*)realloc(fa->array,
+                                     sizeof(msgpack_zone_finalizer) * nnext);
 	if(tmp == NULL) {
 		return false;
 	}
-
+    
 	fa->array  = tmp;
 	fa->end    = tmp + nnext;
 	fa->tail   = tmp + nused;
-
+    
 	fa->tail->func = func;
 	fa->tail->data = data;
-
+    
 	++fa->tail;
-
+    
 	return true;
 }
 
@@ -163,7 +163,7 @@ bool msgpack_zone_is_empty(msgpack_zone* zone)
 	msgpack_zone_chunk_list* const cl = &zone->chunk_list;
 	msgpack_zone_finalizer_array* const fa = &zone->finalizer_array;
 	return cl->free == zone->chunk_size && cl->head->next == NULL &&
-		fa->tail == fa->array;
+    fa->tail == fa->array;
 }
 
 
@@ -182,33 +182,33 @@ void msgpack_zone_clear(msgpack_zone* zone)
 bool msgpack_zone_init(msgpack_zone* zone, size_t chunk_size)
 {
 	zone->chunk_size = chunk_size;
-
+    
 	if(!init_chunk_list(&zone->chunk_list, chunk_size)) {
 		return false;
 	}
-
+    
 	init_finalizer_array(&zone->finalizer_array);
-
+    
 	return true;
 }
 
 msgpack_zone* msgpack_zone_new(size_t chunk_size)
 {
 	msgpack_zone* zone = (msgpack_zone*)malloc(
-			sizeof(msgpack_zone) + chunk_size);
+                                               sizeof(msgpack_zone) + chunk_size);
 	if(zone == NULL) {
 		return NULL;
 	}
-
+    
 	zone->chunk_size = chunk_size;
-
+    
 	if(!init_chunk_list(&zone->chunk_list, chunk_size)) {
 		free(zone);
 		return NULL;
 	}
-
+    
 	init_finalizer_array(&zone->finalizer_array);
-
+    
 	return zone;
 }
 
@@ -219,3 +219,52 @@ void msgpack_zone_free(msgpack_zone* zone)
 	free(zone);
 }
 
+void* msgpack_zone_malloc_no_align(msgpack_zone* zone, size_t size)
+{
+    msgpack_zone_chunk_list* cl = &zone->chunk_list;
+    
+    if(zone->chunk_list.free < size) {
+        return msgpack_zone_malloc_expand(zone, size);
+    }
+    
+    char* ptr = cl->ptr;
+    cl->free -= size;
+    cl->ptr  += size;
+    
+    return ptr;
+}
+
+inline void* msgpack_zone_malloc(msgpack_zone* zone, size_t size)
+{
+    return msgpack_zone_malloc_no_align(zone,
+                                        ((size)+((MSGPACK_ZONE_ALIGN)-1)) & ~((MSGPACK_ZONE_ALIGN)-1));
+}
+
+
+bool msgpack_zone_push_finalizer_expand(msgpack_zone* zone,
+                                        void (*func)(void* data), void* data);
+
+inline bool msgpack_zone_push_finalizer(msgpack_zone* zone,
+                                        void (*func)(void* data), void* data)
+{
+    msgpack_zone_finalizer_array* const fa = &zone->finalizer_array;
+    msgpack_zone_finalizer* fin = fa->tail;
+    
+    if(fin == fa->end) {
+        return msgpack_zone_push_finalizer_expand(zone, func, data);
+    }
+    
+    fin->func = func;
+    fin->data = data;
+    
+    ++fa->tail;
+    
+    return true;
+}
+
+inline void msgpack_zone_swap(msgpack_zone* a, msgpack_zone* b)
+{
+    msgpack_zone tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
